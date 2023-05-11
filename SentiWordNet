@@ -1,0 +1,69 @@
+% Start the stopwatch timer
+tic;
+
+% Import the data
+data = readtable('IMDB Dataset.csv');
+
+% Preprocess the data
+data.review = lower(data.review);
+data.review = regexprep(data.review, '<[^>]+>', '');
+data.review = regexprep(data.review, '[^a-zA-Z\s]', '');
+
+% Handle negations
+negationWords = {'not', 'isnt', 'arent', 'dont', 'doesnt', 'didnt', 'hasnt', 'hadnt', 'wasnt', 'werent', 'wont', 'cant', 'couldnt', 'shouldnt', 'wouldnt'};
+for negationWord = negationWords
+    data.review = regexprep(data.review, strcat(negationWord, ' (\w+)'), '$1_not');
+end
+
+data.sentiment = categorical(data.sentiment);
+
+% Use a smaller subset of the data for faster processing as it was taking
+% to long to test code when i had to make changes
+num_samples = 50000;
+data = data(1:num_samples, :);
+
+% Load SentiWordNet
+sentiWordNet = readtable('SentiWordNet_3.0.0.txt', 'FileType', 'text', 'Delimiter', '\t', 'ReadVariableNames', false, 'HeaderLines', 27, 'TextType', 'string');
+sentiWordNet.Properties.VariableNames = {'POS', 'ID', 'PosScore', 'NegScore', 'SynsetTerms', 'Gloss'};
+
+% Tokenize the reviews
+data.review = tokenizedDocument(data.review);
+
+% Remove stop words
+data.review = removeStopWords(data.review);
+
+% Lemmatize words
+data.review = normalizeWords(data.review, 'Style', 'lemma');
+
+% Convert tokenizedDocument to cell array of words
+num_reviews = numel(data.review);
+reviews_words = cell(num_reviews, 1);
+for i = 1:num_reviews
+    tokens = tokenDetails(data.review(i));
+    reviews_words{i} = tokens.Token;
+end
+
+% Calculate sentiment scores and classify reviews more efficiently
+sentiment_scores = cellfun(@(r) sum(calculate_sentiment_swn(r, sentiWordNet)), reviews_words);
+data.predicted_sentiment = categorical(sentiment_scores >= 0, [true, false], {'positive', 'negative'});
+
+% Calculate evaluation metrics
+confusionMatrix = confusionmat(data.sentiment, data.predicted_sentiment);
+TP = confusionMatrix(1,1);
+TN = confusionMatrix(2,2);
+FP = confusionMatrix(1,2);
+FN = confusionMatrix(2,1);
+
+precision = TP / (TP + FP);
+recall = TP / (TP + FN);
+f1_score = 2 * (precision * recall) / (precision + recall);
+accuracy = mean(data.sentiment == data.predicted_sentiment);
+
+% Stop the stopwatch timer
+elapsedTime = toc;
+
+fprintf('Total running time: %s.\n', datestr(datenum(0,0,0,0,0,elapsedTime),'HH:MM:SS'));
+fprintf('Accuracy: %.2f%%\n', accuracy * 100);
+fprintf('Precision: %.2f%%\n', precision * 100);
+fprintf('Recall: %.2f%%\n', recall * 100);
+fprintf('F1-score: %.2f%%\n', f1_score * 100);
